@@ -1,0 +1,18 @@
+package com.cineflow.streaming.dto;
+
+import lombok.Builder;
+import lombok.Getter;
+
+import java.util.UUID;
+
+@Getter
+@Builder
+public class StreamingInfo {
+    private UUID videoId;
+    private String title;
+    private Long durationSeconds;
+    private String masterPlaylistUrl;
+    private String[] qualities;
+    private int resumeAtSeconds;
+    private boolean cacheHit;
+}

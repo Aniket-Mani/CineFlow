@@ -1,0 +1,47 @@
+
+# ──────────────────────────────────────────────
+# Stage 1: Build CineFlow Backend JAR
+# ──────────────────────────────────────────────
+FROM maven:3.9.6-eclipse-temurin-17 AS builder
+
+
+WORKDIR /app
+
+# Copy Maven configuration first for dependency caching
+COPY pom.xml .
+RUN mvn dependency:go-offline -q
+
+# Copy application source code
+COPY src ./src
+
+# Build executable Spring Boot JAR
+RUN mvn clean package -DskipTests -q
+
+
+# ──────────────────────────────────────────────
+# Stage 2: Production Runtime Image
+# ──────────────────────────────────────────────
+FROM eclipse-temurin:17-jre-jammy
+
+# Install FFmpeg for video processing and transcoding
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy compiled application from builder stage
+COPY --from=builder /app/target/*.jar app.jar
+
+# Create temporary directory for HLS processing
+RUN mkdir -p /cineflow-temp
+
+# Configure FFmpeg output directory
+ENV FFMPEG_OUTPUT_DIR=/cineflow-temp
+
+# Application port
+EXPOSE 8080
+
+# Start CineFlow backend
+ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -1,0 +1,135 @@
+package com.cineflow.metrics.controller;
+
+import com.cineflow.common.response.ApiResponse;
+import com.cineflow.metrics.dto.MetricsSummary;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+@RestController
+@RequestMapping("/api/v1/metrics")
+@RequiredArgsConstructor
+@Tag(name = "Metrics API", description = "Performance dashboard and bottleneck analysis")
+public class MetricsController {
+
+    private final MeterRegistry meterRegistry;
+
+    @GetMapping("/summary")
+    @Operation(summary = "Get a human-readable performance metrics summary")
+    public ResponseEntity<ApiResponse<MetricsSummary>> getSummary() {
+
+        double hits   = safeCounterCount("cineflow.cache.hits");
+        double misses = safeCounterCount("cineflow.cache.misses");
+        double total  = hits + misses;
+        double hitRatio = total > 0 ? (hits / total) * 100.0 : 0.0;
+
+        double cachedP50  = safeTimerMs("cineflow.latency.cached", 0.5);
+        double cachedP95  = safeTimerMs("cineflow.latency.cached", 0.95);
+        double cachedP99  = safeTimerMs("cineflow.latency.cached", 0.99);
+        double uncachedP50 = safeTimerMs("cineflow.latency.uncached", 0.5);
+        double uncachedP95 = safeTimerMs("cineflow.latency.uncached", 0.95);
+        double uncachedP99 = safeTimerMs("cineflow.latency.uncached", 0.99);
+
+        double improvement = (uncachedP50 > 0 && cachedP50 > 0)
+                ? ((uncachedP50 - cachedP50) / uncachedP50) * 100.0
+                : 0.0;
+
+        double startupP50 = safeTimerMs("cineflow.latency.streaming.startup", 0.5);
+        double startupP95 = safeTimerMs("cineflow.latency.streaming.startup", 0.95);
+
+        double uploadP95     = safeTimerMs("cineflow.latency.upload", 0.95);
+        double processingP95 = safeTimerMs("cineflow.latency.processing", 0.95);
+
+        double totalRequests = safeCounterCount("cineflow.requests.total");
+
+        double heapUsed = safeGaugeValue("jvm.memory.used", "area", "heap") / (1024.0 * 1024.0);
+        double heapMax  = safeGaugeValue("jvm.memory.max",  "area", "heap") / (1024.0 * 1024.0);
+        double cpuUsage = safeGaugeValue("process.cpu.usage") * 100.0;
+
+        // Determine system health
+        String systemHealth = "HEALTHY";
+        if (cpuUsage > 85.0) systemHealth = "DEGRADED";
+        if (cpuUsage > 95.0) systemHealth = "DOWN";
+
+        MetricsSummary summary = MetricsSummary.builder()
+                // Core metrics
+                .cacheHitCount(hits)
+                .cacheMissCount(misses)
+                .cacheHitRatio(round2(hitRatio))
+                .cachedLatencyP50Ms(round2(cachedP50))
+                .cachedLatencyP95Ms(round2(cachedP95))
+                .cachedLatencyP99Ms(round2(cachedP99))
+                .uncachedLatencyP50Ms(round2(uncachedP50))
+                .uncachedLatencyP95Ms(round2(uncachedP95))
+                .uncachedLatencyP99Ms(round2(uncachedP99))
+                .latencyImprovementPercent(round2(improvement))
+                .streamingStartupP50Ms(round2(startupP50))
+                .streamingStartupP95Ms(round2(startupP95))
+                .totalRequests(totalRequests)
+                .uploadLatencyP95Ms(round2(uploadP95))
+                .processingLatencyP95Ms(round2(processingP95))
+                .jvmHeapUsedMb(round2(heapUsed))
+                .jvmHeapMaxMb(round2(heapMax))
+                .cpuUsagePercent(round2(cpuUsage))
+                // Frontend-friendly aliases
+                .avgProcessingLatencyMs(round2(processingP95 > 0 ? processingP95 : uncachedP50))
+                .streamingThroughputMbps(round2(startupP50))
+                .activeStreams(0)
+                .kafkaEventsPerSec(0.0)
+                .systemHealth(systemHealth)
+                .build();
+
+        return ResponseEntity.ok(ApiResponse.success(summary));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    private double safeCounterCount(String name) {
+        try {
+            Counter counter = meterRegistry.find(name).counter();
+            return counter != null ? counter.count() : 0.0;
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    private double safeTimerMs(String name, double percentile) {
+        try {
+            Timer timer = meterRegistry.find(name).timer();
+            if (timer == null || timer.count() == 0) return 0.0;
+            double p = timer.percentile(percentile, TimeUnit.MILLISECONDS);
+            if (p > 0) return p;
+            return timer.mean(TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    private double safeGaugeValue(String name, String... tags) {
+        try {
+            if (tags.length >= 2) {
+                var gauge = meterRegistry.find(name).tag(tags[0], tags[1]).gauge();
+                return gauge != null ? gauge.value() : 0.0;
+            }
+            var gauge = meterRegistry.find(name).gauge();
+            return gauge != null ? gauge.value() : 0.0;
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    private double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+}

@@ -1,0 +1,56 @@
+
+spring:
+  application:
+    name: cineflow
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cineflow}
+    username: ${SPRING_DATASOURCE_USERNAME:cineflow}
+    password: ${SPRING_DATASOURCE_PASSWORD:cineflow123}
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    validate-on-migrate: false
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      missing-topics-fatal: false
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+aws:
+  region: ${AWS_REGION:ap-south-1}
+  access-key: ${AWS_ACCESS_KEY_ID:dummy-test-key}
+  secret-key: ${AWS_SECRET_ACCESS_KEY:dummy-test-secret}
+  s3:
+    bucket-name: ${AWS_S3_BUCKET_NAME:test-bucket}
+    presigned-url-expiry: 60
+
+ffmpeg:
+  path: ffmpeg
+  ffprobe-path: ffprobe
+  output-dir: ${FFMPEG_OUTPUT_DIR:${java.io.tmpdir}/cineflow-test}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    expiration: 86400000
+
+logging:
+  level:
+    com.cineflow: WARN
+    org.springframework: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
